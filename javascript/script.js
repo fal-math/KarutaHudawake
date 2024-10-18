@@ -1,7 +1,7 @@
 // Tesseract.jsからcreateWorkerをインポート
 const { createWorker } = Tesseract;
 let worker;
-const hiragana = 'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖ';
+const hiragana = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをん'
 
 // ワーカーの初期化を最初に行う
 async function initializeWorker(lang = 'jpn', whitelist = hiragana) {
