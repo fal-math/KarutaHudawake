@@ -17,8 +17,8 @@ navigator.mediaDevices.getUserMedia({ video: true })
 document.getElementById("capture").addEventListener("click", async () => {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = video.videoWidth/5;
+  canvas.height = video.videoHeight/5;
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
   // Tesseract.jsを使ってOCRを実行
