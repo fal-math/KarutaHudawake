@@ -11,7 +11,7 @@ navigator.mediaDevices.getUserMedia({ video: true })
   });
 
 // 「判別する」ボタンのクリックイベント
-document.getElementById("capture").addEventListener("click", () => {
+document.getElementById("capture").addEventListener("click", async () => {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   canvas.width = video.videoWidth;
@@ -19,7 +19,7 @@ document.getElementById("capture").addEventListener("click", () => {
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
   // Tesseract.jsを使ってOCRを実行
-  const text = recognize(canvas);
+  const text = await recognize(canvas);
 
   document.getElementById("result").innerText = `判別結果: ${text}`;
 
