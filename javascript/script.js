@@ -1,4 +1,5 @@
 const video = document.getElementById("camera");
+const whitelist = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをん';
 
 // カメラ映像を取得して表示
 navigator.mediaDevices.getUserMedia({ video: true })
@@ -21,9 +22,9 @@ document.getElementById("capture").addEventListener("click", () => {
   Tesseract.recognize(
     canvas,
     'jpn',
+    whitelist,
     {
-      logger: (m) => console.log(m),
-      tessedit_char_whitelist: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをん'
+      logger: (m) => console.log(m)
     }
   ).then(({ data: { text } }) => {
     document.getElementById("result").innerText = `判別結果: ${text}`;
