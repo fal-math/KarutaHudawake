@@ -1,5 +1,8 @@
+// Tesseract.jsからcreateWorkerをインポート
+const { createWorker } = Tesseract;
+
 const video = document.getElementById("camera");
-const hiragana = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをん';
+const hiragana = 'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖ';
 
 // カメラ映像を取得して表示
 navigator.mediaDevices.getUserMedia({ video: true })
@@ -32,12 +35,11 @@ document.getElementById("capture").addEventListener("click", async () => {
   } else {
     document.getElementById("result").innerText += "（試合で使用しません）";
   }
-  ;
 });
 
+// Tesseract.jsのワーカーを使用した認識関数
 async function recognize(canvas, lang = 'jpn', whitelist = hiragana) {
   const worker = createWorker({
-    langPath: '...',
     logger: m => console.log(m),
   });
   await worker.load();
@@ -50,6 +52,7 @@ async function recognize(canvas, lang = 'jpn', whitelist = hiragana) {
   });
   // 認識
   const { data: { text } } = await worker.recognize(canvas);
+  await worker.terminate(); // 作業終了後にワーカーを終了
   return text;
 }
 
