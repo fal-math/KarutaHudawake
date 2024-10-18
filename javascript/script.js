@@ -1,30 +1,10 @@
 // Tesseract.jsからcreateWorkerをインポート
 const { createWorker } = Tesseract;
-let worker;
+
+const video = document.getElementById("camera");
 const hiragana = 'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖ';
 
-// ワーカーの初期化を最初に行う
-async function initializeWorker(lang = 'jpn', whitelist = hiragana) {
-  worker = createWorker({
-    logger: m => console.log(m),
-  });
-  await worker.load();
-  await worker.loadLanguage(lang);
-  await worker.initialize(lang);
-  await worker.setParameters({
-    tessedit_char_whitelist: whitelist
-  });
-}
-
-// ページ読み込み時にワーカーを初期化する
-initializeWorker().then(() => {
-  console.log("ワーカーの初期化が完了しました");
-}).catch(err => {
-  console.error("ワーカーの初期化に失敗しました:", err);
-});
-
-// カメラ映像の表示と文字認識の処理
-const video = document.getElementById("camera");
+// カメラ映像を取得して表示
 navigator.mediaDevices.getUserMedia({ video: true })
   .then((stream) => {
     video.srcObject = stream;
@@ -35,20 +15,18 @@ navigator.mediaDevices.getUserMedia({ video: true })
 
 // 「判別する」ボタンのクリックイベント
 document.getElementById("capture").addEventListener("click", async () => {
-  if (!worker) {
-    alert("ワーカーの初期化がまだ完了していません。もう少しお待ちください。");
-    return;
-  }
-
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = video.videoWidth/5;
+  canvas.height = video.videoHeight/5;
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+  // Tesseract.jsを使ってOCRを実行
   const text = await recognize(canvas);
+
   document.getElementById("result").innerText = `判別結果: ${text}`;
 
+  // 50枚の札に含まれるかを判別
   const storedCards = localStorage.getItem("karutaCards");
   const karutaCards = storedCards ? JSON.parse(storedCards) : [];
 
@@ -59,9 +37,22 @@ document.getElementById("capture").addEventListener("click", async () => {
   }
 });
 
-// 既存のワーカーを利用してOCRを実行
-async function recognize(canvas) {
+// Tesseract.jsのワーカーを使用した認識関数
+async function recognize(canvas, lang = 'jpn', whitelist = hiragana) {
+  const worker = createWorker({
+    logger: m => console.log(m),
+  });
+  await worker.load();
+  // 言語を設定
+  await worker.loadLanguage(lang);
+  await worker.initialize(lang);
+  // 限定する文字を設定
+  await worker.setParameters({
+    tessedit_char_whitelist: whitelist
+  });
+  // 認識
   const { data: { text } } = await worker.recognize(canvas);
+  await worker.terminate(); // 作業終了後にワーカーを終了
   return text;
 }
 
