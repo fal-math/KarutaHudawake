@@ -1,17 +1,213 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>競技かるた判別アプリ</title>
-    <link rel="stylesheet" href="css/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>百人一首カード判別デモ</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    video,
+    canvas {
+      display: block;
+      margin: 0 auto;
+    }
+
+    #result {
+      font-size: 1.5rem;
+      margin-top: 1rem;
+    }
+
+    #debug {
+      font-size: 0.8rem;
+      color: #666;
+      text-align: left;
+      white-space: pre-wrap;
+      margin: 1rem auto;
+      max-width: 90%;
+    }
+  </style>
 </head>
+
 <body>
-    <h1>競技かるた判別アプリ</h1>
-    <video id="camera" autoplay></video>
-    <button id="capture">判別する</button>
-    <div id="result">ここに結果が表示されます</div>
-    <script src="javascript/script.js"></script>
+  <h1>百人一首カード判別デモ</h1>
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <div id="result">読み取り中…</div>
+  <div id="debug">デバッグ情報：</div>
+
+  <!-- テンプレート画像（隠し要素）-->
+  <div style="display:none">
+    <!-- 以下は template/1.jpg 〜 template/100.jpg を想定. 軽量化のため一旦5個 -->
+    <img id="tpl1" src="template/1.jpg" alt="1番" />
+    <img id="tpl2" src="template/2.jpg" alt="2番" />
+    <img id="tpl3" src="template/3.jpg" alt="3番" />
+    <img id="tpl4" src="template/4.jpg" alt="4番" />
+    <img id="tpl5" src="template/5.jpg" alt="5番" />
+  </div>
+
+  <!-- OpenCV.js -->
+  <script src="https://docs.opencv.org/4.12.0/opencv.js"></script>
+  <script>
+    console.log("🐱‍💻 スクリプト読み込み OK");
+
+    // グローバル宣言
+    let video, resultEl, debugEl, capCanvas, capCtx;
+    let orb, bf;
+    const TEMPLATE_COUNT = 100;
+    const templates = [];
+
+    // カメラセットアップ
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      video.srcObject = stream;
+      return new Promise(r => video.onloadedmetadata = () => r());
+    }
+
+    // テンプレート読み込み
+    function loadTemplates() {
+      debugEl.textContent = 'Step: テンプレート読み込み中…';
+      for (let i = 1; i <= TEMPLATE_COUNT; i++) {
+        const img = document.getElementById(`tpl${i}`);
+        if (!img) continue;
+        const mat = cv.imread(img);
+        const gray = new cv.Mat();
+        cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+        const kp = new cv.KeyPointVector();
+        const des = new cv.Mat();
+        orb.detectAndCompute(gray, new cv.Mat(), kp, des);
+        templates.push({ id: i, descriptors: des });
+        mat.delete(); gray.delete();
+      }
+      debugEl.textContent = `Step: テンプレート ${templates.length} 枚読み込み完了`;
+    }
+
+    // 四角形検出＋透視変換
+    function detectCardROI(srcGray) {
+      debugEl.textContent = 'Step: 輪郭検出中…';
+      const contours = new cv.MatVector();
+      const hier = new cv.Mat();
+      cv.findContours(srcGray, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      for (let i = 0; i < contours.size(); i++) {
+        const cnt = contours.get(i);
+        const approx = new cv.Mat();
+        cv.approxPolyDP(cnt, approx, 5, true);
+        if (approx.rows === 4 && cv.contourArea(approx) > 10000) {
+          debugEl.textContent = 'Step: 透視変換中…';
+          // 頂点ソート
+          const pts = [];
+          for (let j = 0; j < 4; j++) {
+            pts.push({ x: approx.intPtr(j, 0)[0], y: approx.intPtr(j, 0)[1] });
+          }
+          pts.sort((a, b) => a.y - b.y);
+          const top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
+          const bot = pts.slice(2, 4).sort((a, b) => a.x - b.x);
+          const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            top[0].x, top[0].y, top[1].x, top[1].y,
+            bot[1].x, bot[1].y, bot[0].x, bot[0].y
+          ]);
+          const w = 300, h = 450;
+          const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
+          const M = cv.getPerspectiveTransform(srcPts, dstPts);
+          const warped = new cv.Mat();
+          cv.warpPerspective(srcGray, warped, M, new cv.Size(w, h));
+          // 解放
+          cnt.delete(); approx.delete();
+          contours.delete(); hier.delete();
+          srcPts.delete(); dstPts.delete(); M.delete();
+          return warped;
+        }
+        approx.delete(); cnt.delete();
+      }
+      contours.delete(); hier.delete();
+      return null;
+    }
+
+    // ORB マッチング
+    function computeBestMatch(warpedGray) {
+      debugEl.textContent = 'Step: 特徴量抽出中…';
+      const kp1 = new cv.KeyPointVector();
+      const des1 = new cv.Mat();
+      orb.detectAndCompute(warpedGray, new cv.Mat(), kp1, des1);
+
+      debugEl.textContent = 'Step: マッチング中…';
+      let best = { id: null, count: 0 };
+      for (const tpl of templates) {
+        const matches = new cv.DMatchVectorVector();
+        bf.knnMatch(des1, tpl.descriptors, matches, 2);
+        let good = 0;
+        for (let i = 0; i < matches.size(); i++) {
+          const m = matches.get(i).get(0), n = matches.get(i).get(1);
+          if (m.distance < 0.75 * n.distance) good++;
+        }
+        matches.delete();
+        if (good > best.count) best = { id: tpl.id, count: good };
+      }
+      des1.delete(); kp1.delete();
+      return best;
+    }
+
+    // フレーム処理
+    function processFrame() {
+      debugEl.textContent = 'Step: キャプチャ中…';
+      capCtx.drawImage(video, 0, 0, capCanvas.width, capCanvas.height);
+
+      debugEl.textContent = 'Step: Mat 変換中…';
+      const src = cv.imread(capCanvas);
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+      debugEl.textContent = 'Step: ROI検出開始…';
+      const roi = detectCardROI(gray);
+
+      if (roi) {
+        const match = computeBestMatch(roi);
+        debugEl.textContent = `Step: マッチ完了 → id=${match.id} (count=${match.count})`;
+        resultEl.textContent = match.id ? `歌番号：${match.id}` : '未検出';
+        roi.delete();
+      } else {
+        debugEl.textContent = 'Step: ROI未検出 → カード未検出';
+        resultEl.textContent = 'カード未検出';
+      }
+
+      src.delete(); gray.delete();
+      requestAnimationFrame(processFrame);
+    }
+
+    // DOM 準備と OpenCV 初期化待ち
+    document.addEventListener('DOMContentLoaded', async () => {
+      // 要素取得
+      video = document.getElementById('video');
+      resultEl = document.getElementById('result');
+      debugEl = document.getElementById('debug');
+      debugEl.textContent = 'Step: DOMContentLoaded 完了';
+
+      // オフスクリーンキャンバス作成
+      capCanvas = document.createElement('canvas');
+      capCanvas.width = video.videoWidth;
+      capCanvas.height = video.videoHeight;
+      capCtx = capCanvas.getContext('2d');
+
+      // カメラ起動
+      await setupCamera();
+
+      // OpenCV.js 初期化待ち
+      cv['onRuntimeInitialized'] = () => {
+        debugEl.textContent = 'Step: OpenCV 初期化完了';
+        orb = new cv.ORB();
+        bf = new cv.BFMatcher(cv.NORM_HAMMING);
+        loadTemplates();
+        processFrame();
+      };
+    });
+  </script>
 </body>
+
 </html>
